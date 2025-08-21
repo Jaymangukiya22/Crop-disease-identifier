@@ -1,0 +1,33 @@
+<resources>
+    <string name="app_name">ML Plant Disease Detection</string>
+    
+    <!-- Welcome Page -->
+    <string name="welcome_title">ML Based Plant Disease Detection</string>
+    <string name="welcome_subtitle">Detect plant diseases using advanced machine learning</string>
+    <string name="lets_get_started">Let\'s Get Started</string>
+    
+    <!-- Detection Page -->
+    <string name="detection_title">Disease Detection</string>
+    <string name="capture_image">Capture Image</string>
+    <string name="upload_image">Upload Image</string>
+    <string name="select_image_first">Please select an image first</string>
+    
+    <!-- Disease Information -->
+    <string name="disease_name">Disease Name</string>
+    <string name="cause">Cause</string>
+    <string name="prevention">Prevention</string>
+    
+    <!-- Placeholder values -->
+    <string name="placeholder_disease">Leaf Blight</string>
+    <string name="placeholder_cause">Fungal infection caused by Alternaria alternata</string>
+    <string name="placeholder_prevention">Apply fungicide, improve air circulation, remove infected leaves</string>
+    
+    <!-- Permissions -->
+    <string name="camera_permission_required">Camera permission is required to capture images</string>
+    <string name="storage_permission_required">Storage permission is required to access images</string>
+    <string name="permission_denied">Permission denied. Some features may not work properly.</string>
+    
+    <!-- Error messages -->
+    <string name="error_capturing_image">Error capturing image</string>
+    <string name="error_loading_image">Error loading image</string>
+</resources>

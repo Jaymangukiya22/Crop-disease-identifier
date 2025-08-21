@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    
+    <!-- Plant pot -->
+    <path
+        android:fillColor="#8D6E63"
+        android:pathData="M6,19h12v2H6z"/>
+    
+    <!-- Pot base -->
+    <path
+        android:fillColor="#6D4C41"
+        android:pathData="M7,19h10v1H7z"/>
+    
+    <!-- Main stem -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M11,19v-6h2v6z"/>
+    
+    <!-- Leaves -->
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M9,15l-2,2l2,2l2,-2z"/>
+    
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M15,15l-2,2l2,2l2,-2z"/>
+    
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M11,11l-1,2l1,2l1,-2z"/>
+    
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M13,11l-1,2l1,2l1,-2z"/>
+    
+    <!-- Flower/Leaf at top -->
+    <path
+        android:fillColor="#81C784"
+        android:pathData="M10,9l2,2l2,-2l-2,-2z"/>
+    
+    <!-- Small decorative leaves -->
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="M8,13l1,1l-1,1l-1,-1z"/>
+    
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="M16,13l1,1l-1,1l-1,-1z"/>
+</vector> 
