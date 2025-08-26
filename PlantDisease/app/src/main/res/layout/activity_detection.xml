@@ -158,6 +158,28 @@
 
                 </androidx.cardview.widget.CardView>
 
+                <!-- Model Status Indicator -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:layout_marginTop="16dp"
+                    android:padding="8dp"
+                    android:background="@drawable/info_item_background">
+                    
+                    <TextView
+                        android:id="@+id/tv_model_status"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="🔄 Initializing Model..."
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary"
+                        android:fontFamily="sans-serif-medium" />
+                        
+                </LinearLayout>
+
                 <!-- Image Status Text -->
                 <TextView
                     android:id="@+id/tv_image_status"
@@ -168,7 +190,7 @@
                     android:textColor="@color/text_secondary"
                     android:gravity="center"
                     android:layout_gravity="center"
-                    android:layout_marginTop="20dp"
+                    android:layout_marginTop="8dp"
                     android:fontFamily="sans-serif-light" />
 
             </LinearLayout>
@@ -251,6 +273,41 @@
                         android:textColor="@color/text_primary"
                         android:layout_marginTop="8dp"
                         android:fontFamily="sans-serif-light" />
+
+                </LinearLayout>
+
+                <!-- Debug Info (Top Predictions) -->
+                <LinearLayout
+                    android:id="@+id/ll_debug_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/info_item_background"
+                    android:padding="20dp"
+                    android:layout_marginBottom="16dp"
+                    android:visibility="visible">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔍 MODEL DEBUG INFO"
+                        android:textSize="13sp"
+                        android:textColor="@color/text_secondary"
+                        android:textStyle="bold"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.1"
+                        android:fontFamily="sans-serif-medium" />
+
+                    <TextView
+                        android:id="@+id/tv_debug_info"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Top predictions will appear here..."
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginTop="8dp"
+                        android:fontFamily="monospace"
+                        android:lineSpacingExtra="2dp" />
 
                 </LinearLayout>
 

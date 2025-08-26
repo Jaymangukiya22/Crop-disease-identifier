@@ -17,6 +17,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    aaptOptions {
+        noCompress("ort")
+        noCompress("onnx")
+        noCompress("config")
+        noCompress("txt")
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -45,4 +52,5 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
 }

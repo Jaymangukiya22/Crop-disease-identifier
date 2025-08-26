@@ -19,6 +19,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.google.android.material.button.MaterialButton
 import java.io.File
 import java.io.IOException
@@ -88,6 +90,12 @@ class DetectionActivity : AppCompatActivity() {
         // Initialize UI components
         initializeViews()
         setupClickListeners()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Release ML model resources
+        mlModelHelper.release()
     }
 
     /**
@@ -273,25 +281,22 @@ class DetectionActivity : AppCompatActivity() {
     private fun performDiseaseDetection() {
         // Show loading state
         tvImageStatus.text = "Analyzing image..."
-        
+
         // Use the stored bitmap for analysis
         currentBitmap?.let { bitmap ->
-            // Perform disease detection using ML model
-            mlModelHelper.detectDisease(bitmap, object : MLModelHelper.DiseaseDetectionCallback {
-                override fun onSuccess(result: MLModelHelper.DetectionResult) {
-                    runOnUiThread {
-                        updateDiseaseInfo(result)
-                        tvImageStatus.text = "Analysis complete (${(result.confidence * 100).toInt()}% confidence)"
-                    }
+            // Launch a coroutine to call the suspend function
+            lifecycleScope.launch {
+                try {
+                    val result = mlModelHelper.detectDisease(bitmap) // Call the suspend function directly
+                    // Update UI on the main thread
+                    updateDiseaseInfo(result)
+                    tvImageStatus.text = "Analysis complete (${(result.confidence * 100).toInt()}% confidence)"
+                } catch (e: Exception) {
+                    // Handle errors, for example, show a toast
+                    Toast.makeText(this@DetectionActivity, "Error detecting disease: ${e.message}", Toast.LENGTH_LONG).show()
+                    tvImageStatus.text = "Analysis failed"
                 }
-                
-                override fun onError(error: String) {
-                    runOnUiThread {
-                        Toast.makeText(this@DetectionActivity, error, Toast.LENGTH_LONG).show()
-                        tvImageStatus.text = "Analysis failed"
-                    }
-                }
-            })
+            }
         } ?: run {
             // Fallback to placeholder if no image
             val diseaseResult = getPlaceholderDiseaseResult()
@@ -312,21 +317,33 @@ class DetectionActivity : AppCompatActivity() {
                 0.85f,
                 "Fungal infection caused by Alternaria alternata",
                 "Apply fungicide, improve air circulation, remove infected leaves",
-                "Moderate"
+                "Moderate",
+                listOf("0.8500", "0.1200", "0.0300"),
+                listOf("Leaf Blight", "Powdery Mildew", "Healthy"),
+                false,
+                "Placeholder prediction analysis"
             ),
             MLModelHelper.DetectionResult(
                 "Powdery Mildew",
                 0.92f,
                 "Fungal disease caused by Erysiphe cichoracearum",
                 "Apply sulfur-based fungicide, increase plant spacing, improve ventilation",
-                "High"
+                "High",
+                listOf("0.9200", "0.0500", "0.0300"),
+                listOf("Powdery Mildew", "Leaf Blight", "Healthy"),
+                false,
+                "Placeholder prediction analysis"
             ),
             MLModelHelper.DetectionResult(
                 "Bacterial Spot",
                 0.78f,
                 "Bacterial infection caused by Xanthomonas campestris",
                 "Remove infected plants, apply copper-based bactericide, avoid overhead watering",
-                "Moderate"
+                "Moderate",
+                listOf("0.7800", "0.1500", "0.0700"),
+                listOf("Bacterial Spot", "Leaf Blight", "Healthy"),
+                false,
+                "Placeholder prediction analysis"
             )
         )
         

@@ -1,201 +1,388 @@
+// File: /Users/jay/Documents/Sem7/MPC/Project/Crop-disease-identifier/PlantDisease/app/src/main/java/com/example/plantdiseasedetection/MLModelHelper.kt
 package com.example.plantdiseasedetection
 
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.nio.FloatBuffer
+import java.util.Collections
 
-/**
- * MLModelHelper - Utility class for ML model integration
- * 
- * This class provides a clean interface for integrating the GLCM + Decision Tree
- * model with the Android application. It handles image preprocessing, feature
- * extraction, and model prediction.
- * 
- * TODO: Implement actual ML model integration
- */
 class MLModelHelper(private val context: Context) {
 
+    private var ortEnvironment: OrtEnvironment? = null
+    private var ortSession: OrtSession? = null
+
+    // Constants for image preprocessing
     companion object {
         private const val TAG = "MLModelHelper"
-        
-        // Model configuration constants
-        private const val INPUT_IMAGE_SIZE = 224 // Standard size for many ML models
-        private const val GLCM_DISTANCE = 1
-        private const val GLCM_ANGLES = 4 // 0°, 45°, 90°, 135°
+        private const val MODEL_PATH = "plant_disease.ort" // Your ONNX model file
+        private const val INPUT_SIZE = 224 // Example input size, adjust as per your model
+        private const val CHANNELS = 3
+        private val MEAN = floatArrayOf(0.485f, 0.456f, 0.406f) // Example mean values for normalization
+        private val STD = floatArrayOf(0.229f, 0.224f, 0.225f)  // Example std values for normalization
+    }
+
+    private var isModelInitialized = false
+    private var modelLoadError: String? = null
+    private var labels: List<String> = emptyList()
+
+    init {
+        // Initialize ONNX Runtime environment and session
+        ortEnvironment = OrtEnvironment.getEnvironment()
+        ortSession = createOrtSession()
+    }
+
+    private fun createOrtSession(): OrtSession? {
+        return ortEnvironment?.let { env ->
+            try {
+                Log.d(TAG, "🔄 Loading ONNX model from assets: $MODEL_PATH")
+                val modelBytes = context.assets.open(MODEL_PATH).readBytes()
+                Log.d(TAG, "✅ Model loaded successfully. Size: ${modelBytes.size} bytes")
+
+                // Load labels
+                labels = loadDiseaseLabels()
+                Log.d(TAG, "✅ Labels loaded: ${labels.size} classes")
+                labels.forEachIndexed { index, label ->
+                    Log.d(TAG, "Class $index: $label")
+                }
+
+                val session = env.createSession(modelBytes, OrtSession.SessionOptions())
+                isModelInitialized = true
+                modelLoadError = null
+                Log.d(TAG, "✅ ONNX Runtime session created successfully")
+                session
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to initialize ONNX model: ${e.message}", e)
+                isModelInitialized = false
+                modelLoadError = e.message
+                null
+            }
+        }
     }
 
     /**
-     * Interface for disease detection results
+     * Performs disease detection on the given bitmap.
+     * This function should be called from a background thread.
      */
-    interface DiseaseDetectionCallback {
-        fun onSuccess(result: DetectionResult)
-        fun onError(error: String)
+    suspend fun detectDisease(bitmap: Bitmap): DetectionResult {
+        if (!isModelInitialized || ortSession == null || ortEnvironment == null) {
+            throw Exception("❌ Model not initialized. Error: ${modelLoadError ?: "Unknown error during initialization"}")
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "🔍 Starting disease detection...")
+                Log.d(TAG, "📸 Input image size: ${bitmap.width}x${bitmap.height}")
+
+                // Preprocess the image
+                val inputTensor = preprocessImage(bitmap)
+                Log.d(TAG, "✅ Image preprocessed to ${INPUT_SIZE}x${INPUT_SIZE}")
+
+                // Run inference
+                val inputName = ortSession!!.inputNames.iterator().next() // Safe call due to isModelInitialized check
+                Log.d(TAG, "🧠 Running ONNX inference with input: $inputName")
+                val inputs = Collections.singletonMap(inputName, inputTensor)
+                val outputs = ortSession!!.run(inputs) // Safe call
+
+                // Postprocess the output
+                outputs.use { // Use .use for AutoCloseable
+                    @Suppress("UNCHECKED_CAST")
+                    val outputArray = (outputs[0].value as Array<FloatArray>)[0]
+                    Log.d(TAG, "📊 Model output array size: ${outputArray.size}")
+
+                    // Get sorted indices as a List<Int>
+                    val sortedIndicesList = outputArray.indices.sortedByDescending { outputArray[it] }
+
+                    Log.d(TAG, "🏆 Top 5 predictions:")
+                    for (i in 0 until minOf(5, sortedIndicesList.size)) {
+                        val idx = sortedIndicesList[i]
+                        val className = if (idx < labels.size) labels[idx] else "Unknown_$idx"
+                        Log.d(TAG, "  ${i+1}. $className: ${String.format("%.4f", outputArray[idx])}")
+                    }
+
+                    if (sortedIndicesList.isEmpty()) {
+                        throw Exception("Model output is empty or invalid.")
+                    }
+
+                    val maxIdx = sortedIndicesList[0]
+                    val confidence = outputArray[maxIdx]
+                    val detectedDiseaseName = if (maxIdx < labels.size) labels[maxIdx] else "Unknown_$maxIdx"
+
+                    Log.d(TAG, "🎯 Final prediction: $detectedDiseaseName (confidence: ${String.format("%.4f", confidence)})")
+
+                    // Analyze prediction for bias - Convert List<Int> to IntArray here
+                    val biasAnalysis = analyzePredictionBias(outputArray, sortedIndicesList.toIntArray(), labels)
+
+                    val finalPrediction = if (confidence < 0.7f || biasAnalysis.isBiased) {
+                        "Uncertain - Please retake photo"
+                    } else {
+                        detectedDiseaseName
+                    }
+
+                    val (cause, prevention, severity) = if (finalPrediction.contains("Uncertain")) {
+                        Triple(
+                            "Low confidence or biased prediction detected",
+                            "Please take a clearer, well-lit photo of the leaf. Ensure the leaf fills most of the frame.",
+                            "N/A"
+                        )
+                    } else {
+                        getDiseaseInfo(detectedDiseaseName, confidence)
+                    }
+
+                    val result = DetectionResult(
+                        diseaseName = finalPrediction,
+                        confidence = confidence,
+                        cause = cause,
+                        prevention = prevention,
+                        severity = severity,
+                        rawPredictions = outputArray.take(5).map { String.format("%.4f", it) }, // outputArray is FloatArray
+                        topClasses = sortedIndicesList.take(5).map { // Use sortedIndicesList (List<Int>) here
+                            if (it < labels.size) labels[it] else "Unknown_$it"
+                        },
+                        isBiasedPrediction = biasAnalysis.isBiased,
+                        predictionAnalysis = biasAnalysis.analysis
+                    )
+
+                    // Cleanup inputTensor, outputs is handled by .use block
+                    inputTensor.close()
+
+                    Log.d(TAG, "✅ Detection completed successfully")
+                    result
+                } ?: throw Exception("Failed to get model output (outputs were null).")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error during disease detection: ${e.message}", e)
+                // Ensure the exception is re-thrown to be caught by the calling coroutine
+                throw Exception("Error during disease detection: ${e.message}", e)
+            }
+        }
     }
 
     /**
-     * Data class for disease detection results
+     * Preprocesses the input bitmap to the format expected by the ONNX model.
+     * This typically involves resizing, normalization, and converting to a FloatBuffer.
      */
+    private fun preprocessImage(bitmap: Bitmap): OnnxTensor {
+        // 1. Resize the bitmap
+        val resizedBitmap = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
+
+        // 2. Convert bitmap to FloatBuffer and normalize
+        val floatBuffer = FloatBuffer.allocate(CHANNELS * INPUT_SIZE * INPUT_SIZE)
+        floatBuffer.rewind()
+
+        val intValues = IntArray(INPUT_SIZE * INPUT_SIZE)
+        resizedBitmap.getPixels(intValues, 0, resizedBitmap.width, 0, 0, resizedBitmap.width, resizedBitmap.height)
+
+        for (i in 0 until INPUT_SIZE * INPUT_SIZE) {
+            val pixel = intValues[i]
+            // Extract RGB, normalize, and put into buffer in NCHW (Batch, Channels, Height, Width) format
+            // Assuming model expects BGR, if RGB then adjust order for MEAN and STD if they are BGR specific
+            // For NCHW, fill channels for one pixel, then next pixel etc.
+            // Example: For CHW (which is what we want for a single image, batch dim is 1 later)
+            // Pixel 0: R0, G0, B0
+            // Pixel 1: R1, G1, B1
+            // FloatBuffer should be: R0,G0,B0, R1,G1,B1 ... for HWC direct buffer fill
+            // OR for CHW: R0,R1,... G0,G1,... B0,B1,...
+            // Current ONNX standard is NCHW. The loop below populates in HWC order into the buffer,
+            // which needs to be reshaped or transposed if the model strictly expects CHW in that order.
+            // However, ONNX runtime CreateTensor for FloatBuffer with shape (1, C, H, W) will
+            // interpret the flat FloatBuffer data in that order. So the loop needs to fill CHW.
+
+            // To fill in CHW order directly:
+            // This loop structure is incorrect for direct CHW filling.
+            // It should be three separate loops or a calculation for indices.
+            // A simpler way for this loop is to fill HWC and rely on ONNX interpretation
+            // or perform a transpose if needed.
+            // Current loop fills HWC:
+            // floatBuffer.put(((pixel shr 16 and 0xFF) / 255.0f - MEAN[0]) / STD[0]) // R
+            // floatBuffer.put(((pixel shr 8 and 0xFF) / 255.0f - MEAN[1]) / STD[1])  // G
+            // floatBuffer.put(((pixel and 0xFF) / 255.0f - MEAN[2]) / STD[2])        // B
+
+            // Corrected loop for CHW planar format:
+            // This requires changing how data is put into floatBuffer.
+            // Let's assume the previous HWC-like filling was intended and the ONNX runtime handles it
+            // with the (1,C,H,W) shape. If not, this part needs careful review based on model specifics.
+            // For now, retaining the original HWC-style fill logic as the ONNX `CreateTensor` will take the flat buffer
+            // and interpret it according to the provided shape (1, C, H, W).
+            // This means the buffer should contain all Red channel pixels, then all Green, then all Blue.
+
+        }
+        // Correct way to fill for NCHW (N=1)
+        for (c in 0 until CHANNELS) {
+            for (h in 0 until INPUT_SIZE) {
+                for (w in 0 until INPUT_SIZE) {
+                    val pixelIndex = h * INPUT_SIZE + w
+                    val pixel = intValues[pixelIndex]
+                    val value = when (c) {
+                        0 -> (pixel shr 16 and 0xFF) / 255.0f // Red
+                        1 -> (pixel shr 8 and 0xFF) / 255.0f  // Green
+                        else -> (pixel and 0xFF) / 255.0f     // Blue
+                    }
+                    floatBuffer.put((value - MEAN[c]) / STD[c])
+                }
+            }
+        }
+        floatBuffer.rewind()
+
+        // Create tensor
+        val shape = longArrayOf(1, CHANNELS.toLong(), INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
+        return OnnxTensor.createTensor(ortEnvironment!!, floatBuffer, shape) // Safe call due to isModelInitialized check
+    }
+
+    /**
+     * Analyze prediction for bias towards specific classes
+     */
+    private fun analyzePredictionBias(outputArray: FloatArray, sortedIndices: IntArray, labels: List<String>): BiasAnalysis {
+        if (sortedIndices.isEmpty()) {
+            return BiasAnalysis(isBiased = false, analysis = "Bias Analysis: No predictions to analyze.")
+        }
+        val topPredictionValue = outputArray[sortedIndices[0]]
+        val secondPredictionValue = if (sortedIndices.size > 1) outputArray[sortedIndices[1]] else 0f
+        val confidenceGap = topPredictionValue - secondPredictionValue
+
+        val topClassName = if (sortedIndices[0] < labels.size) labels[sortedIndices[0]] else "Unknown"
+
+        val isCornPrediction = topClassName.contains("Corn", ignoreCase = true) ||
+                topClassName.contains("Maize", ignoreCase = true)
+
+        val isBiased = when {
+            confidenceGap > 0.8f && topPredictionValue > 0.9f -> true // Very high confidence and large gap
+            isCornPrediction && topPredictionValue > 0.6f && confidenceGap > 0.3f -> true // Corn bias heuristic
+            sortedIndices.take(minOf(3, sortedIndices.size)).all { idx ->
+                val className = if (idx < labels.size) labels[idx] else ""
+                className.contains("Corn", ignoreCase = true) || className.contains("Maize", ignoreCase = true)
+            } && sortedIndices.size >= 3 -> true // Top 3 are all corn
+            else -> false
+        }
+
+        val analysis = buildString {
+            appendLine("🔍 BIAS ANALYSIS:")
+            appendLine("Top prediction: $topClassName (${String.format("%.4f", topPredictionValue)})")
+            appendLine("Second prediction value: ${String.format("%.4f", secondPredictionValue)}")
+            appendLine("Confidence gap: ${String.format("%.4f", confidenceGap)}")
+            appendLine("Is corn prediction: $isCornPrediction")
+            appendLine("Detected bias: $isBiased")
+            if (isBiased) {
+                appendLine("⚠️ BIAS DETECTED - Model may be overfitted or showing biased behavior.")
+            }
+        }
+
+        Log.d(TAG, analysis)
+        return BiasAnalysis(isBiased, analysis)
+    }
+
+    data class BiasAnalysis(
+        val isBiased: Boolean,
+        val analysis: String
+    )
+
+    /**
+     * Load disease labels from assets
+     */
+    private fun loadDiseaseLabels(): List<String> {
+        return try {
+            context.assets.open("labels.txt").use { inputStream ->
+                inputStream.bufferedReader().readLines().map { it.trim() }.filter { it.isNotEmpty() }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to load labels: ${e.message}", e)
+            // Return a default list or throw an error to indicate critical failure
+            listOf("Error: Could not load labels")
+        }
+    }
+
+    /**
+     * Get detailed disease information based on disease name and confidence
+     */
+    private fun getDiseaseInfo(diseaseName: String, confidence: Float): Triple<String, String, String> {
+        val severity = when {
+            confidence > 0.85f -> "High"
+            confidence > 0.6f -> "Moderate"
+            else -> "Low"
+        }
+
+        // Example: This should ideally come from a more structured data source
+        return when {
+            diseaseName.contains("Healthy", ignoreCase = true) -> Triple(
+                "No significant disease detected. The plant appears to be healthy.",
+                "Maintain good plant hygiene. Continue regular monitoring for any signs of stress or disease. Ensure proper watering and fertilization according to plant needs.",
+                "None"
+            )
+            diseaseName.contains("Scab", ignoreCase = true) -> Triple(
+                "Caused by the fungus Venturia inaequalis. Thrives in cool, wet spring weather. Symptoms include dark, scabby lesions on leaves and fruit.",
+                "Remove and destroy infected leaves and fruit. Apply appropriate fungicides starting early in the season. Prune trees to improve air circulation. Rake up fallen leaves in autumn.",
+                severity
+            )
+            diseaseName.contains("Black Rot", ignoreCase = true) -> Triple(
+                "Fungal disease caused by Botryosphaeria obtusa. Affects fruit, leaves, and wood. Symptoms include fruit rot, leaf spots, and cankers on branches.",
+                "Prune out and destroy infected plant parts, including cankered limbs. Apply fungicides during the growing season. Ensure good air circulation and sunlight penetration.",
+                severity
+            )
+            diseaseName.contains("Rust", ignoreCase = true) -> Triple(
+                "Caused by various species of fungi. Characterized by reddish-orange pustules on leaves and stems. Can reduce plant vigor and yield.",
+                "Remove and destroy infected plant material. Apply fungicides if necessary. Some rusts require an alternate host; removing it can break the disease cycle. Improve air circulation.",
+                severity
+            )
+            // Add more specific disease information here
+            else -> Triple(
+                "Information for '$diseaseName' is not available in the local database.",
+                "Consult agricultural extension services or online plant pathology resources for more information about this specific condition.",
+                severity
+            )
+        }
+    }
+
+    /**
+     * Releases resources used by the ONNX Runtime.
+     * Call this when the model is no longer needed.
+     */
+    fun release() {
+        Log.d(TAG, "Releasing ONNX Runtime resources.")
+        try {
+            ortSession?.close()
+            ortEnvironment?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing ONNX resources: ${e.message}", e)
+        } finally {
+            ortSession = null
+            ortEnvironment = null
+            isModelInitialized = false
+        }
+    }
+
+    /**
+     * Get model status information
+     */
+    fun getModelStatus(): ModelStatus {
+        return ModelStatus(
+            isInitialized = isModelInitialized,
+            error = modelLoadError,
+            totalClasses = labels.size,
+            modelPath = MODEL_PATH
+        )
+    }
+
+    data class ModelStatus(
+        val isInitialized: Boolean,
+        val error: String?,
+        val totalClasses: Int,
+        val modelPath: String
+    )
+
+    // Data class for detection results
     data class DetectionResult(
         val diseaseName: String,
         val confidence: Float,
         val cause: String,
         val prevention: String,
-        val severity: String
+        val severity: String,
+        val rawPredictions: List<String>, // List of top raw prediction scores as strings
+        val topClasses: List<String>,     // List of top class names
+        val isBiasedPrediction: Boolean,
+        val predictionAnalysis: String
     )
-
-    /**
-     * Perform disease detection on the given image
-     * 
-     * @param bitmap Input image bitmap
-     * @param callback Callback to handle results
-     */
-    fun detectDisease(bitmap: Bitmap, callback: DiseaseDetectionCallback) {
-        try {
-            // TODO: ML MODEL INTEGRATION
-            // 1. Preprocess image
-            val preprocessedImage = preprocessImage(bitmap)
-            
-            // 2. Extract GLCM features
-            val glcmFeatures = extractGLCMFeatures(preprocessedImage)
-            
-            // 3. Run model prediction
-            val prediction = runModelPrediction(glcmFeatures)
-            
-            // 4. Return results
-            callback.onSuccess(prediction)
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in disease detection: ${e.message}")
-            callback.onError("Disease detection failed: ${e.message}")
-        }
-    }
-
-    /**
-     * Preprocess the input image for ML model
-     * 
-     * TODO: Implement actual image preprocessing
-     * - Resize to model input size
-     * - Normalize pixel values
-     * - Convert to grayscale if needed
-     * - Apply any required transformations
-     */
-    private fun preprocessImage(bitmap: Bitmap): Bitmap {
-        // TODO: Implement actual preprocessing
-        Log.d(TAG, "Preprocessing image: ${bitmap.width}x${bitmap.height}")
-        
-        // Placeholder: resize image to standard size
-        return Bitmap.createScaledBitmap(bitmap, INPUT_IMAGE_SIZE, INPUT_IMAGE_SIZE, true)
-    }
-
-    /**
-     * Extract GLCM (Gray-Level Co-occurrence Matrix) features from the image
-     * 
-     * TODO: Implement actual GLCM feature extraction
-     * - Calculate GLCM matrices for different angles and distances
-     * - Extract texture features: contrast, homogeneity, energy, correlation
-     * - Return feature vector
-     */
-    private fun extractGLCMFeatures(bitmap: Bitmap): FloatArray {
-        // TODO: Implement actual GLCM feature extraction
-        Log.d(TAG, "Extracting GLCM features from ${bitmap.width}x${bitmap.height} image")
-        
-        // Placeholder: return dummy feature vector
-        // In real implementation, this would contain actual GLCM features
-        return FloatArray(20) { 0.5f } // 20 features as placeholder
-    }
-
-    /**
-     * Run the ML model prediction using extracted features
-     * 
-     * TODO: Implement actual model prediction
-     * - Load the trained Decision Tree model
-     * - Pass GLCM features to the model
-     * - Get prediction results
-     * - Map predictions to disease information
-     */
-    private fun runModelPrediction(features: FloatArray): DetectionResult {
-        // TODO: Implement actual model prediction
-        Log.d(TAG, "Running model prediction with ${features.size} features")
-        
-        // Placeholder implementation - replace with actual model
-        return getPlaceholderPrediction()
-    }
-
-    /**
-     * Get placeholder prediction for demonstration
-     * 
-     * TODO: Remove this method when actual model is integrated
-     */
-    private fun getPlaceholderPrediction(): DetectionResult {
-        val diseases = listOf(
-            DetectionResult(
-                "Leaf Blight",
-                0.85f,
-                "Fungal infection caused by Alternaria alternata",
-                "Apply fungicide, improve air circulation, remove infected leaves",
-                "Moderate"
-            ),
-            DetectionResult(
-                "Powdery Mildew",
-                0.92f,
-                "Fungal disease caused by Erysiphe cichoracearum",
-                "Apply sulfur-based fungicide, increase plant spacing, improve ventilation",
-                "High"
-            ),
-            DetectionResult(
-                "Bacterial Spot",
-                0.78f,
-                "Bacterial infection caused by Xanthomonas campestris",
-                "Remove infected plants, apply copper-based bactericide, avoid overhead watering",
-                "Moderate"
-            ),
-            DetectionResult(
-                "Healthy Leaf",
-                0.95f,
-                "No disease detected",
-                "Continue current care routine, monitor for any changes",
-                "None"
-            )
-        )
-        
-        return diseases.random()
-    }
-
-    /**
-     * Initialize the ML model
-     * 
-     * TODO: Implement model initialization
-     * - Load TensorFlow Lite model or other ML framework
-     * - Initialize model parameters
-     * - Set up inference engine
-     */
-    fun initializeModel() {
-        // TODO: Implement actual model initialization
-        Log.d(TAG, "Initializing ML model...")
-        
-        // Placeholder: simulate model loading
-        Thread.sleep(1000) // Simulate loading time
-        Log.d(TAG, "ML model initialized successfully")
-    }
-
-    /**
-     * Check if the model is ready for inference
-     */
-    fun isModelReady(): Boolean {
-        // TODO: Implement actual model readiness check
-        return true // Placeholder
-    }
-
-    /**
-     * Get model information
-     */
-    fun getModelInfo(): String {
-        return """
-            Model Type: GLCM + Decision Tree
-            Input Size: ${INPUT_IMAGE_SIZE}x${INPUT_IMAGE_SIZE}
-            GLCM Distance: $GLCM_DISTANCE
-            GLCM Angles: $GLCM_ANGLES
-            Status: ${if (isModelReady()) "Ready" else "Not Ready"}
-        """.trimIndent()
-    }
-} 
+}
