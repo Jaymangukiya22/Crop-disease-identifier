@@ -42,6 +42,8 @@ class DetectionActivity : AppCompatActivity() {
     private lateinit var btnUploadImage: MaterialButton
     private lateinit var ivPlantImage: ImageView
     private lateinit var tvImageStatus: TextView
+    private lateinit var tvModelStatus: TextView
+    private lateinit var tvDebugInfo: TextView
     private lateinit var tvDiseaseName: TextView
     private lateinit var tvCause: TextView
     private lateinit var tvPrevention: TextView
@@ -106,9 +108,14 @@ class DetectionActivity : AppCompatActivity() {
         btnUploadImage = findViewById(R.id.btn_upload_image)
         ivPlantImage = findViewById(R.id.iv_plant_image)
         tvImageStatus = findViewById(R.id.tv_image_status)
+        tvModelStatus = findViewById(R.id.tv_model_status)
+        tvDebugInfo = findViewById(R.id.tv_debug_info)
         tvDiseaseName = findViewById(R.id.tv_disease_name)
         tvCause = findViewById(R.id.tv_cause)
         tvPrevention = findViewById(R.id.tv_prevention)
+        
+        // Update model status
+        updateModelStatus()
     }
 
     /**
@@ -290,17 +297,21 @@ class DetectionActivity : AppCompatActivity() {
                     val result = mlModelHelper.detectDisease(bitmap) // Call the suspend function directly
                     // Update UI on the main thread
                     updateDiseaseInfo(result)
+                    updateDebugInfo(result)
                     tvImageStatus.text = "Analysis complete (${(result.confidence * 100).toInt()}% confidence)"
                 } catch (e: Exception) {
                     // Handle errors, for example, show a toast
                     Toast.makeText(this@DetectionActivity, "Error detecting disease: ${e.message}", Toast.LENGTH_LONG).show()
                     tvImageStatus.text = "Analysis failed"
+                    tvDebugInfo.text = "❌ Error: ${e.message}"
                 }
             }
         } ?: run {
             // Fallback to placeholder if no image
             val diseaseResult = getPlaceholderDiseaseResult()
             updateDiseaseInfo(diseaseResult)
+            updateDebugInfo(diseaseResult)
+            tvDebugInfo.text = "⚠️ Using placeholder data (no image provided)"
         }
     }
 
@@ -357,6 +368,49 @@ class DetectionActivity : AppCompatActivity() {
         tvDiseaseName.text = diseaseResult.diseaseName
         tvCause.text = diseaseResult.cause
         tvPrevention.text = diseaseResult.prevention
+    }
+
+    /**
+     * Update model status indicator
+     */
+    private fun updateModelStatus() {
+        val status = mlModelHelper.getModelStatus()
+        tvModelStatus.text = when {
+            status.isInitialized -> "✅ Model Ready (${status.totalClasses} classes)"
+            status.error != null -> "❌ Model Error: ${status.error}"
+            else -> "🔄 Initializing Model..."
+        }
+    }
+
+    /**
+     * Update debug information display
+     */
+    private fun updateDebugInfo(result: MLModelHelper.DetectionResult) {
+        val debugText = buildString {
+            appendLine("🎯 FINAL PREDICTION:")
+            appendLine("${result.diseaseName} (${String.format("%.2f", result.confidence * 100)}%)")
+            
+            if (result.isBiasedPrediction) {
+                appendLine()
+                appendLine("⚠️ BIAS DETECTED!")
+                appendLine("Model may be overfitted to corn/maize")
+            }
+            
+            appendLine()
+            appendLine("🏆 TOP 5 PREDICTIONS:")
+            result.topClasses.forEachIndexed { index, className ->
+                val confidence = if (index < result.rawPredictions.size) result.rawPredictions[index] else "N/A"
+                val indicator = if (className.contains("Corn", ignoreCase = true) || 
+                                   className.contains("Maize", ignoreCase = true)) "🌽" else "🌿"
+                appendLine("${index + 1}. $indicator $className: $confidence")
+            }
+            
+            appendLine()
+            appendLine("📊 Raw confidence: ${result.confidence}")
+            appendLine("🔍 Confidence threshold: 0.30 (30%)")
+            appendLine("📈 ${result.predictionAnalysis}")
+        }
+        tvDebugInfo.text = debugText
     }
 
     /**

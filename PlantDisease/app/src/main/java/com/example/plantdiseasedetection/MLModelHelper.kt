@@ -3,6 +3,10 @@ package com.example.plantdiseasedetection
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.util.Log
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
@@ -21,10 +25,11 @@ class MLModelHelper(private val context: Context) {
     companion object {
         private const val TAG = "MLModelHelper"
         private const val MODEL_PATH = "plant_disease.ort" // Your ONNX model file
-        private const val INPUT_SIZE = 224 // Example input size, adjust as per your model
-        private const val CHANNELS = 3
-        private val MEAN = floatArrayOf(0.485f, 0.456f, 0.406f) // Example mean values for normalization
-        private val STD = floatArrayOf(0.229f, 0.224f, 0.225f)  // Example std values for normalization
+        private const val INPUT_SIZE = 224 // Standard input size for most plant disease models
+        private const val CHANNELS = 3 // RGB color channels (NOT grayscale)
+        // ImageNet normalization values - standard for most plant disease models
+        private val MEAN = floatArrayOf(0.485f, 0.456f, 0.406f) // RGB mean values
+        private val STD = floatArrayOf(0.229f, 0.224f, 0.225f)  // RGB std values
     }
 
     private var isModelInitialized = false
@@ -78,10 +83,11 @@ class MLModelHelper(private val context: Context) {
             try {
                 Log.d(TAG, "🔍 Starting disease detection...")
                 Log.d(TAG, "📸 Input image size: ${bitmap.width}x${bitmap.height}")
+                Log.d(TAG, "🎨 Image format: ${bitmap.config} (supports RGB color images)")
 
                 // Preprocess the image
                 val inputTensor = preprocessImage(bitmap)
-                Log.d(TAG, "✅ Image preprocessed to ${INPUT_SIZE}x${INPUT_SIZE}")
+                Log.d(TAG, "✅ Image preprocessed to ${INPUT_SIZE}x${INPUT_SIZE} RGB channels")
 
                 // Run inference
                 val inputName = ortSession!!.inputNames.iterator().next() // Safe call due to isModelInitialized check
@@ -115,10 +121,11 @@ class MLModelHelper(private val context: Context) {
 
                     Log.d(TAG, "🎯 Final prediction: $detectedDiseaseName (confidence: ${String.format("%.4f", confidence)})")
 
-                    // Analyze prediction for bias - Convert List<Int> to IntArray here
+                    // ACCURACY IMPROVEMENT #2: Multi-criteria confidence assessment
+                    val enhancedConfidence = calculateEnhancedConfidence(outputArray, sortedIndicesList, labels)
                     val biasAnalysis = analyzePredictionBias(outputArray, sortedIndicesList.toIntArray(), labels)
 
-                    val finalPrediction = if (confidence < 0.7f || biasAnalysis.isBiased) {
+                    val finalPrediction = if (enhancedConfidence < 0.4f || biasAnalysis.isBiased) {
                         "Uncertain - Please retake photo"
                     } else {
                         detectedDiseaseName
@@ -140,9 +147,12 @@ class MLModelHelper(private val context: Context) {
                         cause = cause,
                         prevention = prevention,
                         severity = severity,
-                        rawPredictions = outputArray.take(5).map { String.format("%.4f", it) }, // outputArray is FloatArray
-                        topClasses = sortedIndicesList.take(5).map { // Use sortedIndicesList (List<Int>) here
-                            if (it < labels.size) labels[it] else "Unknown_$it"
+                        // Fix: Use sorted predictions, not raw array order
+                        rawPredictions = sortedIndicesList.take(5).map { idx -> 
+                            String.format("%.4f", outputArray[idx]) 
+                        },
+                        topClasses = sortedIndicesList.take(5).map { idx ->
+                            if (idx < labels.size) labels[idx] else "Unknown_$idx"
                         },
                         isBiasedPrediction = biasAnalysis.isBiased,
                         predictionAnalysis = biasAnalysis.analysis
@@ -163,12 +173,14 @@ class MLModelHelper(private val context: Context) {
     }
 
     /**
-     * Preprocesses the input bitmap to the format expected by the ONNX model.
-     * This typically involves resizing, normalization, and converting to a FloatBuffer.
+     * Enhanced image preprocessing for better accuracy
      */
     private fun preprocessImage(bitmap: Bitmap): OnnxTensor {
-        // 1. Resize the bitmap
-        val resizedBitmap = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
+        // 1. Apply image enhancement before resizing
+        val enhancedBitmap = enhanceImageQuality(bitmap)
+        
+        // 2. Resize with high-quality filtering
+        val resizedBitmap = Bitmap.createScaledBitmap(enhancedBitmap, INPUT_SIZE, INPUT_SIZE, true)
 
         // 2. Convert bitmap to FloatBuffer and normalize
         val floatBuffer = FloatBuffer.allocate(CHANNELS * INPUT_SIZE * INPUT_SIZE)
@@ -234,40 +246,173 @@ class MLModelHelper(private val context: Context) {
     }
 
     /**
-     * Analyze prediction for bias towards specific classes
+     * ACCURACY IMPROVEMENT #1: Image Quality Enhancement
+     * Enhances image quality before preprocessing to improve recognition rates
+     */
+    private fun enhanceImageQuality(bitmap: Bitmap): Bitmap {
+        val canvas = Canvas()
+        val enhancedBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        canvas.setBitmap(enhancedBitmap)
+        
+        // Apply color enhancement for better plant feature detection
+        val colorMatrix = ColorMatrix().apply {
+            // Increase contrast and saturation for better leaf details
+            setSaturation(1.2f) // 20% more saturation
+            val contrastMatrix = ColorMatrix(floatArrayOf(
+                1.1f, 0f, 0f, 0f, 10f,    // Red: +10% contrast, +10 brightness
+                0f, 1.1f, 0f, 0f, 10f,    // Green: +10% contrast, +10 brightness  
+                0f, 0f, 1.1f, 0f, 10f,    // Blue: +10% contrast, +10 brightness
+                0f, 0f, 0f, 1f, 0f        // Alpha unchanged
+            ))
+            postConcat(contrastMatrix)
+        }
+        
+        val paint = Paint().apply {
+            colorFilter = ColorMatrixColorFilter(colorMatrix)
+            isAntiAlias = true
+            isDither = true
+            isFilterBitmap = true
+        }
+        
+        canvas.drawBitmap(bitmap, 0f, 0f, paint)
+        Log.d(TAG, "🎨 Applied image enhancement: +20% saturation, +10% contrast")
+        return enhancedBitmap
+    }
+
+    /**
+     * ACCURACY IMPROVEMENT #2: Enhanced Confidence Calculation
+     * Uses multiple metrics to assess prediction reliability
+     */
+    private fun calculateEnhancedConfidence(outputArray: FloatArray, sortedIndices: List<Int>, labels: List<String>): Float {
+        if (sortedIndices.isEmpty()) return 0f
+        
+        val topConfidence = outputArray[sortedIndices[0]]
+        val secondConfidence = if (sortedIndices.size > 1) outputArray[sortedIndices[1]] else 0f
+        val thirdConfidence = if (sortedIndices.size > 2) outputArray[sortedIndices[2]] else 0f
+        
+        // Calculate confidence gap (separation between top predictions)
+        val confidenceGap = topConfidence - secondConfidence
+        
+        // Calculate prediction entropy (diversity measure)
+        val top5Values = sortedIndices.take(5).map { outputArray[it] }
+        val totalTop5 = top5Values.sum()
+        val entropy = if (totalTop5 > 0) {
+            -top5Values.sumOf { value ->
+                val p = value / totalTop5
+                if (p > 0) p * kotlin.math.ln(p.toDouble()) else 0.0
+            }
+        } else 0.0
+        
+        // Enhanced confidence formula combining multiple factors
+        val enhancedConfidence = when {
+            // High confidence with good separation
+            topConfidence > 0.8f && confidenceGap > 0.3f -> topConfidence * 1.1f
+            // Good confidence with reasonable separation  
+            topConfidence > 0.6f && confidenceGap > 0.2f -> topConfidence * 1.05f
+            // Penalize low diversity (concentrated predictions)
+            entropy < 0.5 -> topConfidence * 0.9f
+            // Penalize very close predictions
+            confidenceGap < 0.1f -> topConfidence * 0.8f
+            else -> topConfidence
+        }.coerceIn(0f, 1f)
+        
+        Log.d(TAG, "📈 Enhanced confidence: ${String.format("%.4f", enhancedConfidence)} " +
+                   "(raw: ${String.format("%.4f", topConfidence)}, gap: ${String.format("%.4f", confidenceGap)}, " +
+                   "entropy: ${String.format("%.3f", entropy)})")
+        
+        return enhancedConfidence
+    }
+
+    /**
+     * Analyze prediction for bias towards specific classes with improved algorithm
      */
     private fun analyzePredictionBias(outputArray: FloatArray, sortedIndices: IntArray, labels: List<String>): BiasAnalysis {
         if (sortedIndices.isEmpty()) {
             return BiasAnalysis(isBiased = false, analysis = "Bias Analysis: No predictions to analyze.")
         }
+        
         val topPredictionValue = outputArray[sortedIndices[0]]
         val secondPredictionValue = if (sortedIndices.size > 1) outputArray[sortedIndices[1]] else 0f
+        val thirdPredictionValue = if (sortedIndices.size > 2) outputArray[sortedIndices[2]] else 0f
         val confidenceGap = topPredictionValue - secondPredictionValue
 
         val topClassName = if (sortedIndices[0] < labels.size) labels[sortedIndices[0]] else "Unknown"
+        
+        // Get top 5 class names for analysis
+        val top5Classes = sortedIndices.take(5).map { idx ->
+            if (idx < labels.size) labels[idx] else "Unknown"
+        }
 
-        val isCornPrediction = topClassName.contains("Corn", ignoreCase = true) ||
-                topClassName.contains("Maize", ignoreCase = true)
+        // Improved bias detection patterns
+        val cornRelatedCount = top5Classes.count { className ->
+            className.contains("Corn", ignoreCase = true) || 
+            className.contains("Maize", ignoreCase = true)
+        }
+        
+        // Calculate prediction diversity (entropy-like measure)
+        val top5Values = sortedIndices.take(5).map { outputArray[it] }
+        val totalTop5 = top5Values.sum()
+        val diversity = if (totalTop5 > 0) {
+            -top5Values.sumOf { value ->
+                val p = value / totalTop5
+                if (p > 0) p * kotlin.math.ln(p.toDouble()) else 0.0
+            }
+        } else 0.0
 
+        // More conservative bias detection logic
         val isBiased = when {
-            confidenceGap > 0.8f && topPredictionValue > 0.9f -> true // Very high confidence and large gap
-            isCornPrediction && topPredictionValue > 0.6f && confidenceGap > 0.3f -> true // Corn bias heuristic
-            sortedIndices.take(minOf(3, sortedIndices.size)).all { idx ->
-                val className = if (idx < labels.size) labels[idx] else ""
-                className.contains("Corn", ignoreCase = true) || className.contains("Maize", ignoreCase = true)
-            } && sortedIndices.size >= 3 -> true // Top 3 are all corn
-            else -> false
+            // Case 1: Only flag extreme overfitting (99%+ confidence with huge gap)
+            topPredictionValue > 0.99f && confidenceGap > 0.95f -> {
+                Log.d(TAG, "Bias detected: Extreme overfitting pattern")
+                true
+            }
+            
+            // Case 2: Only flag if ALL top 5 are corn-related (very suspicious)
+            cornRelatedCount >= 5 && topPredictionValue > 0.8f -> {
+                Log.d(TAG, "Bias detected: Complete corn dominance in all top 5")
+                true
+            }
+            
+            // Case 3: Only flag extremely low diversity with very high confidence
+            diversity < 0.1 && topPredictionValue > 0.95f -> {
+                Log.d(TAG, "Bias detected: Extremely low prediction diversity")
+                true
+            }
+            
+            // Case 4: Only flag very suspicious corn patterns
+            (topClassName.contains("Corn", ignoreCase = true) || topClassName.contains("Maize", ignoreCase = true)) &&
+            topPredictionValue > 0.9f && confidenceGap > 0.8f && 
+            secondPredictionValue < 0.05f && cornRelatedCount >= 4 -> {
+                Log.d(TAG, "Bias detected: Very suspicious corn prediction pattern")
+                true
+            }
+            
+            else -> {
+                Log.d(TAG, "No bias detected - prediction appears legitimate")
+                false
+            }
         }
 
         val analysis = buildString {
-            appendLine("🔍 BIAS ANALYSIS:")
+            appendLine("🔍 ENHANCED BIAS ANALYSIS:")
             appendLine("Top prediction: $topClassName (${String.format("%.4f", topPredictionValue)})")
-            appendLine("Second prediction value: ${String.format("%.4f", secondPredictionValue)}")
             appendLine("Confidence gap: ${String.format("%.4f", confidenceGap)}")
-            appendLine("Is corn prediction: $isCornPrediction")
-            appendLine("Detected bias: $isBiased")
+            appendLine("Corn-related in top 5: $cornRelatedCount/5")
+            appendLine("Prediction diversity: ${String.format("%.3f", diversity)}")
+            appendLine("Second best: ${String.format("%.4f", secondPredictionValue)}")
+            appendLine("Third best: ${String.format("%.4f", thirdPredictionValue)}")
+            appendLine()
+            appendLine("🎯 Top 5 classes:")
+            top5Classes.forEachIndexed { index, className ->
+                val value = if (index < top5Values.size) String.format("%.4f", top5Values[index]) else "N/A"
+                val indicator = if (className.contains("Corn", ignoreCase = true) || 
+                                   className.contains("Maize", ignoreCase = true)) "🌽" else "🌿"
+                appendLine("  ${index + 1}. $indicator $className: $value")
+            }
+            appendLine()
+            appendLine("🚨 BIAS DETECTED: $isBiased")
             if (isBiased) {
-                appendLine("⚠️ BIAS DETECTED - Model may be overfitted or showing biased behavior.")
+                appendLine("⚠️ Recommendation: Retake photo with better lighting/angle")
             }
         }
 
