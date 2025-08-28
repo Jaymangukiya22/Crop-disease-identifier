@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- History item dimensions -->
+    <dimen name="history_item_min_height">100dp</dimen>
+    <dimen name="history_item_padding">8dp</dimen>
+    <dimen name="history_thumbnail_size">80dp</dimen>
+    <dimen name="history_text_size_small">12sp</dimen>
+    <dimen name="history_text_size_medium">14sp</dimen>
+    
+    <!-- Dialog dimensions -->
+    <dimen name="dialog_padding">16dp</dimen>
+    <dimen name="dialog_corner_radius">8dp</dimen>
+    
+    <!-- Common dimensions -->
+    <dimen name="margin_small">4dp</dimen>
+    <dimen name="margin_medium">8dp</dimen>
+    <dimen name="margin_large">16dp</dimen>
+</resources>

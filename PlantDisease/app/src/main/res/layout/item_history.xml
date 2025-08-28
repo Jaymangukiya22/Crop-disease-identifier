@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="@dimen/margin_medium"
+    android:minHeight="@dimen/history_item_min_height"
+    app:cardCornerRadius="@dimen/dialog_corner_radius"
+    app:cardElevation="2dp"
+    app:cardUseCompatPadding="true">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="@dimen/margin_medium">
+
+        <ImageView
+            android:id="@+id/iv_history_thumbnail"
+            android:layout_width="@dimen/history_thumbnail_size"
+            android:layout_height="@dimen/history_thumbnail_size"
+            android:scaleType="centerCrop"
+            android:contentDescription="@string/history_item_thumbnail_desc"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
+
+        <TextView
+            android:id="@+id/tv_disease_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/margin_large"
+            android:layout_marginEnd="@dimen/margin_medium"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textStyle="bold"
+            android:textSize="@dimen/history_text_size_medium"
+            app:layout_constraintTop_toTopOf="@id/iv_history_thumbnail"
+            app:layout_constraintStart_toEndOf="@id/iv_history_thumbnail"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:text="Leaf Blight"/>
+
+        <TextView
+            android:id="@+id/tv_confidence"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/margin_small"
+            android:background="@drawable/confidence_background"
+            android:paddingHorizontal="@dimen/margin_medium"
+            android:paddingVertical="@dimen/margin_small"
+            android:textColor="@color/white"
+            android:textSize="@dimen/history_text_size_small"
+            app:layout_constraintTop_toBottomOf="@id/tv_disease_name"
+            app:layout_constraintStart_toStartOf="@id/tv_disease_name"
+            tools:text="85% confidence"/>
+
+        <TextView
+            android:id="@+id/tv_timestamp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/margin_small"
+            android:textSize="@dimen/history_text_size_small"
+            android:textColor="?android:attr/textColorSecondary"
+            app:layout_constraintTop_toBottomOf="@id/tv_confidence"
+            app:layout_constraintStart_toStartOf="@id/tv_disease_name"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:text="2 hours ago"/>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</androidx.cardview.widget.CardView>

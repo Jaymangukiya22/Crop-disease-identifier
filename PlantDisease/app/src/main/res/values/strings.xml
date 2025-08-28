@@ -30,4 +30,10 @@
     <!-- Error messages -->
     <string name="error_capturing_image">Error capturing image</string>
     <string name="error_loading_image">Error loading image</string>
+    
+    <!-- History -->
+    <string name="history_item_thumbnail_desc">History item thumbnail</string>
+    <string name="history_dialog_title">Detection History</string>
+    <string name="clear_history">Clear History</string>
+    <string name="close">Close</string>
 </resources>

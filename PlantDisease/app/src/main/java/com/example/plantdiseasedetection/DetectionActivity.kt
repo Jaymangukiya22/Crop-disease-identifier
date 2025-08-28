@@ -2,6 +2,7 @@ package com.example.plantdiseasedetection
 
 import android.Manifest
 import android.app.Activity
+import android.app.Dialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -11,17 +12,24 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.example.plantdiseasedetection.adapter.HistoryAdapter
+import com.example.plantdiseasedetection.model.DetectionHistory
 import kotlinx.coroutines.launch
 import com.google.android.material.button.MaterialButton
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -40,16 +48,21 @@ class DetectionActivity : AppCompatActivity() {
     // UI Components
     private lateinit var btnCaptureImage: MaterialButton
     private lateinit var btnUploadImage: MaterialButton
+    private lateinit var btnHistory: MaterialButton
     private lateinit var ivPlantImage: ImageView
     private lateinit var tvImageStatus: TextView
     private lateinit var tvDiseaseName: TextView
     private lateinit var tvCause: TextView
     private lateinit var tvPrevention: TextView
 
-    // Image handling
+    // Current state
     private var currentImagePath: String? = null
     private var currentImageUri: Uri? = null
     private var currentBitmap: Bitmap? = null
+    
+    // History
+    private val detectionHistory = mutableListOf<DetectionHistory>()
+    private lateinit var historyAdapter: HistoryAdapter
 
     // ML Model helper
     private lateinit var mlModelHelper: MLModelHelper
@@ -89,6 +102,16 @@ class DetectionActivity : AppCompatActivity() {
 
         // Initialize UI components
         initializeViews()
+        
+        // Initialize history adapter
+        historyAdapter = HistoryAdapter(
+            onItemClick = { historyItem ->
+                // When a history item is clicked, load it into the main view
+                loadHistoryItem(historyItem)
+            }
+        )
+
+        // Set up click listeners
         setupClickListeners()
     }
 
@@ -104,11 +127,17 @@ class DetectionActivity : AppCompatActivity() {
     private fun initializeViews() {
         btnCaptureImage = findViewById(R.id.btn_capture_image)
         btnUploadImage = findViewById(R.id.btn_upload_image)
+        btnHistory = findViewById(R.id.btn_history)
         ivPlantImage = findViewById(R.id.iv_plant_image)
         tvImageStatus = findViewById(R.id.tv_image_status)
         tvDiseaseName = findViewById(R.id.tv_disease_name)
         tvCause = findViewById(R.id.tv_cause)
         tvPrevention = findViewById(R.id.tv_prevention)
+        
+        // Add history button to the toolbar
+        findViewById<MaterialButton>(R.id.btn_history).setOnClickListener {
+            showHistoryDialog()
+        }
     }
 
     /**
@@ -129,6 +158,10 @@ class DetectionActivity : AppCompatActivity() {
             } else {
                 requestStoragePermission()
             }
+        }
+        
+        btnHistory.setOnClickListener {
+            showHistoryDialog()
         }
     }
 
@@ -291,6 +324,9 @@ class DetectionActivity : AppCompatActivity() {
                     // Update UI on the main thread
                     updateDiseaseInfo(result)
                     tvImageStatus.text = "Analysis complete (${(result.confidence * 100).toInt()}% confidence)"
+                    
+                    // Add to history
+                    addToHistory(bitmap, result)
                 } catch (e: Exception) {
                     // Handle errors, for example, show a toast
                     Toast.makeText(this@DetectionActivity, "Error detecting disease: ${e.message}", Toast.LENGTH_LONG).show()
@@ -357,6 +393,95 @@ class DetectionActivity : AppCompatActivity() {
         tvDiseaseName.text = diseaseResult.diseaseName
         tvCause.text = diseaseResult.cause
         tvPrevention.text = diseaseResult.prevention
+        
+        // Add to history if we have a valid bitmap
+        currentBitmap?.let { bitmap ->
+            // Create a copy of the bitmap to avoid recycling issues
+            val bitmapCopy = bitmap.copy(bitmap.config, true)
+            val historyItem = DetectionHistory(
+                image = bitmapCopy,
+                result = diseaseResult
+            )
+            detectionHistory.add(historyItem)
+        }
+    }
+
+    /**
+     * Add current detection to history
+     */
+    private fun addToHistory(bitmap: Bitmap, result: MLModelHelper.DetectionResult) {
+        val copyBitmap = bitmap.copy(bitmap.config, true)
+        detectionHistory.add(DetectionHistory(image = copyBitmap, result = result))
+        
+        // Update the history adapter if it's initialized
+        if (::historyAdapter.isInitialized) {
+            historyAdapter.updateItems(detectionHistory)
+        }
+    }
+
+    /**
+     * Load a history item into the main view
+     */
+    private fun loadHistoryItem(historyItem: DetectionHistory) {
+        // Update the main image view
+        ivPlantImage.setImageBitmap(historyItem.image)
+        
+        // Update current bitmap reference
+        currentBitmap = historyItem.image
+        
+        // Update the UI with the history item's detection result
+        updateDiseaseInfo(historyItem.result)
+        
+        // Close the history dialog if it's open
+        // Note: This assumes the dialog is the last shown dialog
+        // In a production app, you might want to keep a reference to the dialog
+        try {
+            (supportFragmentManager.findFragmentByTag("history_dialog") as? android.app.Dialog)?.dismiss()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Show history dialog with previous detections
+     */
+    private fun showHistoryDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_history, null)
+        val recyclerView = dialogView.findViewById<RecyclerView>(R.id.rv_history)
+        val btnClearHistory = dialogView.findViewById<MaterialButton>(R.id.btn_clear_history)
+        
+        // Set up RecyclerView
+        recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.adapter = historyAdapter
+        
+        // Update adapter with current history
+        historyAdapter.updateItems(detectionHistory)
+        
+        // Set up clear history button
+        btnClearHistory.setOnClickListener {
+            detectionHistory.clear()
+            historyAdapter.updateItems(emptyList())
+        }
+        
+        // Show dialog
+        AlertDialog.Builder(this)
+            .setTitle("Detection History")
+            .setView(dialogView)
+            .setPositiveButton("Close", null)
+            .show()
+    }
+     * Convert bitmap to URI for sharing
+     */
+    private fun getImageUri(bitmap: Bitmap): Uri? {
+        val bytes = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bytes)
+        val path = MediaStore.Images.Media.insertImage(
+            contentResolver,
+            bitmap,
+            "PlantDisease_${System.currentTimeMillis()}",
+            null
+        )
+        return path?.let { Uri.parse(it) }
     }
 
     /**
