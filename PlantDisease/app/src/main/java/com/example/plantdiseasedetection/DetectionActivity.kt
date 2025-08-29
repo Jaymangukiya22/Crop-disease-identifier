@@ -43,6 +43,7 @@ class DetectionActivity : AppCompatActivity() {
     private lateinit var btnHistory: MaterialButton
     private lateinit var ivPlantImage: ImageView
     private lateinit var tvImageStatus: TextView
+    private lateinit var tvDebugInfo: TextView
     private lateinit var tvDiseaseName: TextView
     private lateinit var tvCause: TextView
     private lateinit var tvPrevention: TextView
@@ -109,6 +110,7 @@ class DetectionActivity : AppCompatActivity() {
         btnHistory = findViewById(R.id.btn_history)
         ivPlantImage = findViewById(R.id.iv_plant_image)
         tvImageStatus = findViewById(R.id.tv_image_status)
+        tvDebugInfo = findViewById(R.id.tv_debug_info)
         tvDiseaseName = findViewById(R.id.tv_disease_name)
         tvCause = findViewById(R.id.tv_cause)
         tvPrevention = findViewById(R.id.tv_prevention)
@@ -335,17 +337,21 @@ class DetectionActivity : AppCompatActivity() {
                     val result = mlModelHelper.detectDisease(bitmap) // Call the suspend function directly
                     // Update UI on the main thread
                     updateDiseaseInfo(result)
+                    updateDebugInfo(result) // Add this line to show debug predictions
                     tvImageStatus.text = "Analysis complete (${(result.confidence * 100).toInt()}% confidence)"
                 } catch (e: Exception) {
                     // Handle errors, for example, show a toast
                     Toast.makeText(this@DetectionActivity, "Error detecting disease: ${e.message}", Toast.LENGTH_LONG).show()
                     tvImageStatus.text = "Analysis failed"
+                    tvDebugInfo.text = "❌ Error: ${e.message}"
                 }
             }
         } ?: run {
             // Fallback to placeholder if no image
             val diseaseResult = getPlaceholderDiseaseResult()
             updateDiseaseInfo(diseaseResult)
+            updateDebugInfo(diseaseResult) // Add this line for placeholder debug info
+            tvDebugInfo.text = "⚠️ Using placeholder data (no image provided)"
         }
     }
 
@@ -419,6 +425,112 @@ class DetectionActivity : AppCompatActivity() {
             btnHistory.visibility = android.view.View.VISIBLE
         } catch (e: Exception) {
             // Do not crash app if history save fails for any reason
+        }
+    }
+
+    /**
+     * Update debug information display with confidence priority indicators
+     */
+    private fun updateDebugInfo(result: MLModelHelper.DetectionResult) {
+        val debugText = buildString {
+            appendLine("🎯 FINAL PREDICTION:")
+            appendLine("${result.diseaseName} (${String.format("%.2f", result.confidence * 100)}%)")
+            
+            if (result.isBiasedPrediction) {
+                appendLine()
+                appendLine("⚠️ BIAS DETECTED!")
+                appendLine("Model may be overfitted to corn/maize")
+            }
+            
+            appendLine()
+            appendLine("🏆 TOP 5 PREDICTIONS (CONFIDENCE PRIORITY):")
+            
+            // Find the highest confidence prediction
+            val confidenceValues = result.rawPredictions.map { it.toFloatOrNull() ?: 0f }
+            val maxConfidenceIndex = confidenceValues.indexOf(confidenceValues.maxOrNull() ?: 0f)
+            
+            result.topClasses.forEachIndexed { index, className ->
+                val confidence = if (index < result.rawPredictions.size) result.rawPredictions[index] else "N/A"
+                val confidenceFloat = confidence.toFloatOrNull() ?: 0f
+                
+                // Plant type emoji
+                val plantEmoji = getPlantEmoji(className)
+                
+                // Priority indicator based on confidence
+                val priorityIndicator = when {
+                    index == maxConfidenceIndex -> "🥇 HIGHEST CONFIDENCE"
+                    index == 1 -> "🥈 2nd Choice"
+                    index == 2 -> "🥉 3rd Choice"
+                    else -> "   Alternative"
+                }
+                
+                // Confidence bar visualization
+                val confidenceBar = createConfidenceBar(confidenceFloat)
+                
+                // Special formatting for highest confidence
+                if (index == maxConfidenceIndex) {
+                    appendLine("┌─────────────────────────────────────┐")
+                    appendLine("│ $priorityIndicator │")
+                    appendLine("│ $plantEmoji $className")
+                    appendLine("│ Confidence: $confidence ($confidenceBar)")
+                    appendLine("└─────────────────────────────────────┘")
+                } else {
+                    appendLine("${index + 1}. $plantEmoji $className")
+                    appendLine("   Confidence: $confidence ($confidenceBar)")
+                    appendLine("   $priorityIndicator")
+                }
+                appendLine()
+            }
+            
+            appendLine("📊 Model's Top Priority: ${result.topClasses.getOrNull(maxConfidenceIndex) ?: "Unknown"}")
+            appendLine("🔍 Confidence threshold: 0.30 (30%)")
+            appendLine("📈 ${result.predictionAnalysis}")
+        }
+        tvDebugInfo.text = debugText
+    }
+    
+    /**
+     * Get appropriate emoji for plant type
+     */
+    private fun getPlantEmoji(className: String): String {
+        return when {
+            className.contains("Corn", ignoreCase = true) || 
+            className.contains("Maize", ignoreCase = true) -> "🌽"
+            className.contains("Tomato", ignoreCase = true) -> "🍅"
+            className.contains("Apple", ignoreCase = true) -> "🍎"
+            className.contains("Grape", ignoreCase = true) -> "🍇"
+            className.contains("Orange", ignoreCase = true) -> "🍊"
+            className.contains("Strawberry", ignoreCase = true) -> "🍓"
+            className.contains("Blueberry", ignoreCase = true) -> "🫐"
+            className.contains("Raspberry", ignoreCase = true) -> "🫐"
+            className.contains("Cherry", ignoreCase = true) -> "🍒"
+            className.contains("Peach", ignoreCase = true) -> "🍑"
+            className.contains("Potato", ignoreCase = true) -> "🥔"
+            className.contains("Pepper", ignoreCase = true) -> "🌶️"
+            className.contains("Squash", ignoreCase = true) -> "🎃"
+            className.contains("Bean", ignoreCase = true) -> "🫘"
+            className.contains("Healthy", ignoreCase = true) -> "✅"
+            className.contains("Disease", ignoreCase = true) -> "🦠"
+            className.contains("Blight", ignoreCase = true) -> "🍂"
+            className.contains("Rust", ignoreCase = true) -> "🟤"
+            className.contains("Spot", ignoreCase = true) -> "🔴"
+            else -> "🌿"
+        }
+    }
+    
+    /**
+     * Create visual confidence bar
+     */
+    private fun createConfidenceBar(confidence: Float): String {
+        val percentage = (confidence * 100).toInt()
+        val barLength = 10
+        val filledBars = (confidence * barLength).toInt().coerceIn(0, barLength)
+        val emptyBars = barLength - filledBars
+        
+        return buildString {
+            repeat(filledBars) { append("█") }
+            repeat(emptyBars) { append("░") }
+            append(" ${percentage}%")
         }
     }
 

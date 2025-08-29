@@ -123,11 +123,28 @@ class MLModelHelper(private val context: Context) {
 
                     Log.d(TAG, "🎯 Final prediction: $detectedDiseaseName (confidence: ${String.format("%.4f", confidence)})")
 
-                    // Analyze prediction for bias - Convert List<Int> to IntArray here
-                    val biasAnalysis = analyzePredictionBias(outputArray, sortedIndicesList.toIntArray(), labels)
+                    val cornRelatedCount = sortedIndicesList.count { idx ->
+                        val className = if (idx < labels.size) labels[idx] else ""
+                        className.contains("Corn", ignoreCase = true) || className.contains("Maize", ignoreCase = true)
+                    }
 
-                    val finalPrediction = if (confidence < 0.7f || biasAnalysis.isBiased) {
-                        "Uncertain - Please retake photo"
+                    val topPredictionValue = outputArray[sortedIndicesList[0]]
+                    val secondPredictionValue = if (sortedIndicesList.size > 1) outputArray[sortedIndicesList[1]] else 0f
+                    val confidenceGap = topPredictionValue - secondPredictionValue
+
+                    val isBiased = when {
+                        cornRelatedCount >= 5 && topPredictionValue > 0.99f && confidenceGap > 0.98f -> {
+                            Log.d(TAG, "Bias detected: All predictions are corn with 99%+ confidence")
+                            true
+                        }
+                        else -> {
+                            Log.d(TAG, "No bias detected - allowing prediction through")
+                            false
+                        }
+                    }
+
+                    val finalPrediction = if (isBiased) {
+                        "Uncertain - Possible bias detected"
                     } else {
                         detectedDiseaseName
                     }
@@ -148,12 +165,14 @@ class MLModelHelper(private val context: Context) {
                         cause = cause,
                         prevention = prevention,
                         severity = severity,
-                        rawPredictions = outputArray.take(5).map { String.format("%.4f", it) }, // outputArray is FloatArray
+                        rawPredictions = sortedIndicesList.take(5).map { idx -> 
+                            String.format("%.4f", outputArray[idx])
+                        }, // Sorted predictions by confidence
                         topClasses = sortedIndicesList.take(5).map { // Use sortedIndicesList (List<Int>) here
                             if (it < labels.size) labels[it] else "Unknown_$it"
                         },
-                        isBiasedPrediction = biasAnalysis.isBiased,
-                        predictionAnalysis = biasAnalysis.analysis
+                        isBiasedPrediction = isBiased,
+                        predictionAnalysis = "Bias analysis: $isBiased"
                     )
 
                     // Cleanup inputTensor, outputs is handled by .use block
