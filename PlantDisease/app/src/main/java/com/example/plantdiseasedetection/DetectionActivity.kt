@@ -40,6 +40,7 @@ class DetectionActivity : AppCompatActivity() {
     // UI Components
     private lateinit var btnCaptureImage: MaterialButton
     private lateinit var btnUploadImage: MaterialButton
+    private lateinit var btnHistory: MaterialButton
     private lateinit var ivPlantImage: ImageView
     private lateinit var tvImageStatus: TextView
     private lateinit var tvDiseaseName: TextView
@@ -50,6 +51,7 @@ class DetectionActivity : AppCompatActivity() {
     private var currentImagePath: String? = null
     private var currentImageUri: Uri? = null
     private var currentBitmap: Bitmap? = null
+    private var lastSourceType: SessionHistory.SourceType? = null
 
     // ML Model helper
     private lateinit var mlModelHelper: MLModelHelper
@@ -104,11 +106,15 @@ class DetectionActivity : AppCompatActivity() {
     private fun initializeViews() {
         btnCaptureImage = findViewById(R.id.btn_capture_image)
         btnUploadImage = findViewById(R.id.btn_upload_image)
+        btnHistory = findViewById(R.id.btn_history)
         ivPlantImage = findViewById(R.id.iv_plant_image)
         tvImageStatus = findViewById(R.id.tv_image_status)
         tvDiseaseName = findViewById(R.id.tv_disease_name)
         tvCause = findViewById(R.id.tv_cause)
         tvPrevention = findViewById(R.id.tv_prevention)
+
+        // Toggle history button based on current session entries
+        btnHistory.visibility = if (SessionHistory.getAll().isNotEmpty()) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     /**
@@ -129,6 +135,11 @@ class DetectionActivity : AppCompatActivity() {
             } else {
                 requestStoragePermission()
             }
+        }
+
+        btnHistory.setOnClickListener {
+            val intent = Intent(this, HistoryActivity::class.java)
+            startActivity(intent)
         }
     }
 
@@ -209,6 +220,7 @@ class DetectionActivity : AppCompatActivity() {
             )
             intent.putExtra(MediaStore.EXTRA_OUTPUT, currentImageUri)
             cameraLauncher.launch(intent)
+            lastSourceType = SessionHistory.SourceType.CAMERA
         }
     }
 
@@ -218,6 +230,7 @@ class DetectionActivity : AppCompatActivity() {
     private fun openGallery() {
         val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
         galleryLauncher.launch(intent)
+        lastSourceType = SessionHistory.SourceType.GALLERY
     }
 
     /**
@@ -238,9 +251,27 @@ class DetectionActivity : AppCompatActivity() {
      */
     private fun handleCameraResult() {
         currentImagePath?.let { path ->
-            val bitmap = BitmapFactory.decodeFile(path)
-            displayImage(bitmap)
-            performDiseaseDetection() // TODO: Replace with actual ML model call
+            try {
+                val options = BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
+                BitmapFactory.decodeFile(path, options)
+                val target = 1280
+                var sample = 1
+                while (options.outWidth / sample > target || options.outHeight / sample > target) {
+                    sample *= 2
+                }
+                val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sample }
+                val bitmap = BitmapFactory.decodeFile(path, decodeOptions)
+                if (bitmap != null) {
+                    displayImage(bitmap)
+                    performDiseaseDetection()
+                } else {
+                    Toast.makeText(this, getString(R.string.error_loading_image), Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this, getString(R.string.error_loading_image), Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -249,15 +280,29 @@ class DetectionActivity : AppCompatActivity() {
      */
     private fun handleGalleryResult(uri: Uri) {
         try {
-            val inputStream = contentResolver.openInputStream(uri)
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
-            
-            if (bitmap != null) {
-                displayImage(bitmap)
-                performDiseaseDetection() // TODO: Replace with actual ML model call
-            } else {
-                Toast.makeText(this, getString(R.string.error_loading_image), Toast.LENGTH_SHORT).show()
+            contentResolver.openInputStream(uri)?.use { stream ->
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                stream.mark(Int.MAX_VALUE)
+                BitmapFactory.decodeStream(stream, null, options)
+                try { stream.reset() } catch (_: Exception) {}
+
+                val target = 1280
+                var sample = 1
+                while (options.outWidth / sample > target || options.outHeight / sample > target) {
+                    sample *= 2
+                }
+
+                contentResolver.openInputStream(uri)?.use { stream2 ->
+                    val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sample }
+                    val bitmap = BitmapFactory.decodeStream(stream2, null, decodeOptions)
+                    if (bitmap != null) {
+                        currentImageUri = uri
+                        displayImage(bitmap)
+                        performDiseaseDetection()
+                    } else {
+                        Toast.makeText(this, getString(R.string.error_loading_image), Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         } catch (e: Exception) {
             Toast.makeText(this, getString(R.string.error_loading_image), Toast.LENGTH_SHORT).show()
@@ -357,6 +402,24 @@ class DetectionActivity : AppCompatActivity() {
         tvDiseaseName.text = diseaseResult.diseaseName
         tvCause.text = diseaseResult.cause
         tvPrevention.text = diseaseResult.prevention
+
+        // Save to in-memory session history
+        // Safely add to session history to avoid crashes
+        try {
+            val source = lastSourceType ?: SessionHistory.SourceType.GALLERY
+            SessionHistory.add(
+                bitmap = currentBitmap,
+                sourceType = source,
+                diseaseName = diseaseResult.diseaseName,
+                confidence = diseaseResult.confidence,
+                cause = diseaseResult.cause,
+                prevention = diseaseResult.prevention
+            )
+            // Show button after the first successful save
+            btnHistory.visibility = android.view.View.VISIBLE
+        } catch (e: Exception) {
+            // Do not crash app if history save fails for any reason
+        }
     }
 
     /**

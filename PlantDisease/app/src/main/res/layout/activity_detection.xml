@@ -116,6 +116,8 @@
                     app:iconPadding="8dp"
                     app:iconTint="@color/white" />
 
+                
+
             </LinearLayout>
 
         </androidx.cardview.widget.CardView>
@@ -197,6 +199,30 @@
 
         </androidx.cardview.widget.CardView>
 
+        <!-- History Button (below image), only visible when history exists) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_history"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="History"
+            android:textAllCaps="false"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:backgroundTint="@color/secondary"
+            android:textColor="@color/white"
+            app:cornerRadius="28dp"
+            android:elevation="0dp"
+            app:icon="@android:drawable/ic_menu_recent_history"
+            app:iconGravity="textStart"
+            app:iconPadding="8dp"
+            app:iconTint="@color/white"
+            android:visibility="gone"
+            app:layout_constraintTop_toBottomOf="@id/card_image_container"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="24dp" />
+
         <!-- Disease Information Card -->
         <androidx.cardview.widget.CardView
             android:id="@+id/card_disease_info"
@@ -208,7 +234,7 @@
             app:cardBackgroundColor="@color/background_white"
             app:strokeWidth="2dp"
             app:strokeColor="@color/background_light"
-            app:layout_constraintTop_toBottomOf="@id/card_image_container"
+            app:layout_constraintTop_toBottomOf="@id/btn_history"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 

@@ -32,9 +32,17 @@ class MLModelHelper(private val context: Context) {
     private var labels: List<String> = emptyList()
 
     init {
-        // Initialize ONNX Runtime environment and session
-        ortEnvironment = OrtEnvironment.getEnvironment()
-        ortSession = createOrtSession()
+        try {
+            // Initialize ONNX Runtime environment and session
+            ortEnvironment = OrtEnvironment.getEnvironment()
+            ortSession = createOrtSession()
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ ONNX environment init failed: ${e.message}", e)
+            isModelInitialized = false
+            modelLoadError = e.message
+            ortEnvironment = null
+            ortSession = null
+        }
     }
 
     private fun createOrtSession(): OrtSession? {

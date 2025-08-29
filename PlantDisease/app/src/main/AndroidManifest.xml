@@ -38,6 +38,11 @@
             android:name=".DetectionActivity"
             android:exported="false"
             android:theme="@style/Theme.PlantDiseaseDetection" />
+        
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:theme="@style/Theme.PlantDiseaseDetection" />
             
         <!-- File provider for camera images -->
         <provider
