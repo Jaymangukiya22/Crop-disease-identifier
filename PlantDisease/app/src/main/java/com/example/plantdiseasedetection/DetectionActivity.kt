@@ -40,6 +40,7 @@ class DetectionActivity : AppCompatActivity() {
     // UI Components
     private lateinit var btnCaptureImage: MaterialButton
     private lateinit var btnUploadImage: MaterialButton
+    private lateinit var btnViewSessionHistory: MaterialButton
     private lateinit var ivPlantImage: ImageView
     private lateinit var tvImageStatus: TextView
     private lateinit var tvDiseaseName: TextView
@@ -53,6 +54,9 @@ class DetectionActivity : AppCompatActivity() {
 
     // ML Model helper
     private lateinit var mlModelHelper: MLModelHelper
+    
+    // Session manager
+    private lateinit var sessionManager: SessionManager
 
     // Permission request codes
     companion object {
@@ -86,10 +90,21 @@ class DetectionActivity : AppCompatActivity() {
 
         // Initialize ML model helper
         mlModelHelper = MLModelHelper(this)
+        
+        // Initialize session manager
+        sessionManager = SessionManager(this)
 
         // Initialize UI components
         initializeViews()
         setupClickListeners()
+        
+        // Initialize session history button visibility
+        updateSessionHistoryButtonVisibility()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateSessionHistoryButtonVisibility()
     }
 
     override fun onDestroy() {
@@ -104,6 +119,7 @@ class DetectionActivity : AppCompatActivity() {
     private fun initializeViews() {
         btnCaptureImage = findViewById(R.id.btn_capture_image)
         btnUploadImage = findViewById(R.id.btn_upload_image)
+        btnViewSessionHistory = findViewById(R.id.btn_view_session_history)
         ivPlantImage = findViewById(R.id.iv_plant_image)
         tvImageStatus = findViewById(R.id.tv_image_status)
         tvDiseaseName = findViewById(R.id.tv_disease_name)
@@ -129,6 +145,11 @@ class DetectionActivity : AppCompatActivity() {
             } else {
                 requestStoragePermission()
             }
+        }
+        
+        btnViewSessionHistory.setOnClickListener {
+            val intent = Intent(this, SessionHistoryActivity::class.java)
+            startActivity(intent)
         }
     }
 
@@ -240,7 +261,7 @@ class DetectionActivity : AppCompatActivity() {
         currentImagePath?.let { path ->
             val bitmap = BitmapFactory.decodeFile(path)
             displayImage(bitmap)
-            performDiseaseDetection() // TODO: Replace with actual ML model call
+            performDiseaseDetection()
         }
     }
 
@@ -255,12 +276,37 @@ class DetectionActivity : AppCompatActivity() {
             
             if (bitmap != null) {
                 displayImage(bitmap)
-                performDiseaseDetection() // TODO: Replace with actual ML model call
+                performDiseaseDetection()
             } else {
                 Toast.makeText(this, getString(R.string.error_loading_image), Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Toast.makeText(this, getString(R.string.error_loading_image), Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * Save detection result to session
+     */
+    private fun saveToSession(bitmap: Bitmap, result: MLModelHelper.DetectionResult) {
+        try {
+            val imageSource = if (currentImagePath != null) "camera" else "gallery"
+            sessionManager.addSessionItem(bitmap, result, imageSource)
+            Toast.makeText(this, "Result saved to session", Toast.LENGTH_SHORT).show()
+            updateSessionHistoryButtonVisibility()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Failed to save to session: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * Update session history button visibility based on session data
+     */
+    private fun updateSessionHistoryButtonVisibility() {
+        if (sessionManager.hasSessionData()) {
+            btnViewSessionHistory.visibility = android.view.View.VISIBLE
+        } else {
+            btnViewSessionHistory.visibility = android.view.View.GONE
         }
     }
 
@@ -291,6 +337,9 @@ class DetectionActivity : AppCompatActivity() {
                     // Update UI on the main thread
                     updateDiseaseInfo(result)
                     tvImageStatus.text = "Analysis complete (${(result.confidence * 100).toInt()}% confidence)"
+                    
+                    // Save to session
+                    saveToSession(bitmap, result)
                 } catch (e: Exception) {
                     // Handle errors, for example, show a toast
                     Toast.makeText(this@DetectionActivity, "Error detecting disease: ${e.message}", Toast.LENGTH_LONG).show()

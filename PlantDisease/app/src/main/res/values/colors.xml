@@ -33,4 +33,9 @@
     <color name="warning">#FF9800</color>
     <color name="error">#F44336</color>
     <color name="info">#2196F3</color>
+    
+    <!-- Android system colors -->
+    <color name="holo_red_dark">#D32F2F</color>
+    <color name="holo_green_dark">#388E3C</color>
+    <color name="holo_orange_dark">#F57C00</color>
 </resources>
